@@ -199,14 +199,18 @@
 
   // ------------------------------------------------------------ routing
   const ROUTES = { home: renderHome, verify: renderVerify, student: renderStudent, admin: renderAdmin, ledger: renderLedger, login: renderLogin };
-  function go() {
-    const r = (location.hash || "#home").slice(1);
-    let route = ROUTES[r] ? r : "home";
+ function go() {
+    // Hash-ის გაწმენდა: იღებს მხოლოდ გვერდის სახელს (მაგ: "#verify?code=..." -> "verify")
+    const rawHash = (location.hash || "#home").slice(1);
+    const routeName = rawHash.split("?")[0]; 
+    
+    let route = ROUTES[routeName] ? routeName : "home";
     const role = ui.session && ui.session.role;
-    // Private pages need the matching sign-in: students see only their own passport, the admin sees administration.
+    
     if (route === "admin" && role !== "admin") { ui.loginFor = "admin"; route = "login"; }
     else if (route === "student" && role !== "student") { ui.loginFor = role === "admin" ? null : "student"; route = role === "admin" ? "admin" : "login"; }
     else if (route === "login" && role) { route = role; }
+    
     ui.route = route;
     renderNav();
     ROUTES[route]();
@@ -217,16 +221,15 @@
     const links = [["home", "მთავარი"], ["verify", "ვერიფიკაცია"], ["ledger", "ბლოკჩეინი"]];
     if (role === "student") links.push(["student", "ჩემი პასპორტი"]);
     if (role === "admin") links.push(["admin", "ადმინისტრირება"]);
+    
+    // ui.route შეიცავს მხოლოდ გვერდის სახელს (მაგ: "verify")
     $("nav").innerHTML = links.map(([id, label]) => '<a href="#' + id + '" data-route="' + id + '"' + (ui.route === id ? ' aria-current="page"' : "") + ">" + label + "</a>").join("");
+    
     $("session").innerHTML = role
       ? '<span class="who"><b>' + (role === "admin" ? "ადმინისტრატორი" : "სტუდენტი") + "</b>" + esc(ui.session.email) + '</span><button class="btn sm" id="nav-out" type="button">გასვლა</button>'
       : '<span class="proto">ჰაკათონის პროტოტიპი</span><a class="btn primary sm" href="#login"' + (ui.route === "login" ? ' aria-current="page"' : "") + ">შესვლა</a>";
     if ($("nav-out")) $("nav-out").onclick = logout;
   }
-  window.addEventListener("hashchange", go);
-
-  const CHEVRONS = '<svg class="chev" viewBox="0 0 400 520" aria-hidden="true" fill="none" stroke="#fff" stroke-width="34"><path d="M20 20 L200 200 L380 20"/><path d="M20 180 L200 360 L380 180"/><path d="M20 340 L200 520 L380 340"/></svg>';
-
   // ------------------------------------------------------------ home (welcome)
   function renderHome() {
     const c = core.q.counts();
@@ -291,8 +294,24 @@
   }
 
   // ------------------------------------------------------------ verify (public)
-  function renderVerify() {
+ function renderVerify() {
+    let codeFromUrl = null;
+    
+    // ამოწმებს `location.hash`-ს (მაგ: #verify?code=BTUV-...)
+    if (window.location.hash.includes("?")) {
+      const queryPart = window.location.hash.split("?")[1];
+      const params = new URLSearchParams(queryPart);
+      codeFromUrl = params.get("code");
+    } 
+    // თუ hash-ში არ იყო, ამოწმებს `location.search`-ს (მაგ: ?code=BTUV...#verify)
+    else if (window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      codeFromUrl = params.get("code");
+    }
+
     const samples = core.q.passports().filter((p) => p.verification_code).slice(0, 3);
+    const initialCode = codeFromUrl || (ui.verify && ui.verify.code) || "";
+
     $("app").innerHTML =
       '<section class="home-hero"><div class="wrap home-hero-in">' +
         '<div class="home-copy">' +
@@ -300,7 +319,7 @@
           '<h1 class="home-title">შეამოწმე პასპორტი.<br><em>რეგისტრაციის გარეშე.</em></h1>' +
           '<p class="home-lead">შეიყვანე პასპორტის ყდაზე დაბეჭდილი ვერიფიკაციის კოდი ან ატვირთე მიღებული PDF. სისტემა ბლოკჩეინზე ამოწმებს, რომ დოკუმენტი არ შეცვლილა და რომ გამცემი ნამდვილად BTU-ა.</p>' +
           '<form id="vf" novalidate>' +
-            '<div class="home-check"><label for="v-code" class="sr">ვერიფიკაციის კოდი</label><input class="code" id="v-code" autocomplete="off" spellcheck="false" placeholder="BTUV-XXXX-XXXX-XXXX" value="' + esc(ui.verify && ui.verify.code || "") + '"><button class="btn primary" type="submit" id="v-go">შემოწმება</button></div>' +
+            '<div class="home-check"><label for="v-code" class="sr">ვერიფიკაციის კოდი</label><input class="code" id="v-code" autocomplete="off" spellcheck="false" placeholder="BTUV-XXXX-XXXX-XXXX" value="' + esc(initialCode) + '"><button class="btn primary" type="submit" id="v-go">შემოწმება</button></div>' +
             '<div class="home-drop"><label for="v-file">ან ატვირთე PDF<span>შემოწმდება, ზუსტად ემთხვევა თუ არა ფაილი ოფიციალურ ვერსიას</span></label><input type="file" id="v-file" accept="application/pdf,.pdf"></div>' +
             (samples.length ? '<p class="home-note">სატესტო კოდები: ' + samples.map((p) => '<button type="button" class="linklike mono" data-sample="' + esc(p.verification_code) + '">' + esc(p.verification_code) + "</button>").join(" · ") + "</p>" : "") +
           "</form>" +
@@ -311,11 +330,27 @@
         '<div id="v-result" aria-live="polite"></div>' +
         howItWorks() +
       "</div>";
+
     const form = $("vf");
     form.onsubmit = async (e) => { e.preventDefault(); await runVerify(); };
     form.querySelectorAll("[data-sample]").forEach((b) => (b.onclick = () => { $("v-code").value = b.dataset.sample; $("v-file").value = ""; runVerify(); }));
-    if (ui.pendingCode) { $("v-code").value = ui.pendingCode; ui.pendingCode = null; runVerify().then(() => { const r = $("v-result"); if (r && r.scrollIntoView) r.scrollIntoView({ behavior: "smooth", block: "start" }); }); }
-    else if (ui.verify && ui.verify.result) showVerifyResult(ui.verify.result, ui.verify.file);
+
+    // ავტომატური გაშვება
+    if (codeFromUrl) {
+      runVerify().then(() => {
+        const r = $("v-result");
+        if (r && r.scrollIntoView) r.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } else if (ui.pendingCode) {
+      $("v-code").value = ui.pendingCode;
+      ui.pendingCode = null;
+      runVerify().then(() => {
+        const r = $("v-result");
+        if (r && r.scrollIntoView) r.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } else if (ui.verify && ui.verify.result) {
+      showVerifyResult(ui.verify.result, ui.verify.file);
+    }
   }
   function howItWorks() {
     return '<section class="home-sec" style="padding-top:8px"><h2 class="home-h2">რას ამოწმებს სისტემა</h2><div class="home-tiers">' +

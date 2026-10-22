@@ -165,10 +165,10 @@
     const copied = await doc.copyPages(tpl, order);
     copied.forEach((p) => doc.addPage(p));
     const pages = doc.getPages();
-    const verifyUrl = `file:///c%3A/Users/gioka/Desktop/btu-ai-skills-passport-main/index.html#verify?code=${encodeURIComponent(data.verificationCode)}`;
+    const verifyUrl = `https://ai-skill-pink.vercel.app/#verify?code=${encodeURIComponent(data.verificationCode)}`;
     const qrApiUrl = `https://quickchart.io/qr?text=${encodeURIComponent(verifyUrl)}&size=150&margin=1`;
 
-    // QR კოდის სურათის ჩამოტვირთვა ბაიტებად
+
     const qrImageBytes = await fetch(qrApiUrl).then((res) => res.arrayBuffer());
     const qrImage = await doc.embedPng(qrImageBytes);
 
